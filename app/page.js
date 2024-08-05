@@ -1,10 +1,12 @@
 'use client'
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { firestore } from '@/firebase';
 import { Typography, Button, Box, Modal, TextField, IconButton } from '@mui/material';
 import Stack from '@mui/material/Stack';
 import { collection, getDocs, query, doc, setDoc, deleteDoc, getDoc } from 'firebase/firestore';
 import CloseIcon from '@mui/icons-material/Close';
+import CameraAltIcon from '@mui/icons-material/CameraAlt';
+import { Camera } from 'react-camera-pro';
 
 const style = {
   display: 'flex',
@@ -21,49 +23,51 @@ const style = {
   p: 4,
 };
 
-
 export default function Home() {
   const [pantryItems, setPantryItems] = useState([]);
   const [open, setOpen] = useState(false);
+  const [cameraOpen, setCameraOpen] = useState(false);
   const handleOpen = () => setOpen(true);
   const handleClose = () => setOpen(false);
   const [itemName, setItemName] = useState('');
+  const [image, setImage] = useState(null);
+  const camera = useRef(null);
 
   const updatePantry = async () => {
     const snapshot = query(collection(firestore, 'pantry'));
-    const docs = await getDocs(snapshot)
+    const docs = await getDocs(snapshot);
     const pantryList = [];
     docs.forEach((doc) => {
       pantryList.push({ name: doc.id, ...doc.data() });
-
-    })
+    });
     console.log(pantryList);
     setPantryItems(pantryList);
-  }
+  };
 
   useEffect(() => {
     updatePantry();
-  }, [])
+  }, []);
+
   const addItem = async (item) => {
-    const docRef = doc(collection(firestore, 'pantry'), item)
-    const docSnap = await getDoc(docRef)
+    const docRef = doc(collection(firestore, 'pantry'), item);
+    const docSnap = await getDoc(docRef);
     if (docSnap.exists()) {
-      const { quantity } = docSnap.data()
-      await setDoc(docRef, { quantity: quantity + 1 })
+      const { quantity } = docSnap.data();
+      await setDoc(docRef, { quantity: quantity + 1 });
     } else {
-      await setDoc(docRef, { quantity: 1 })
+      await setDoc(docRef, { quantity: 1 });
     }
-    await updatePantry()
-  }
+    await updatePantry();
+  };
+  
 
   const handleAddItem = () => {
     addItem(itemName);
     setItemName('');
     handleClose();
-  }
+  };
 
   const deleteItem = async (item) => {
-
     const docRef = doc(collection(firestore, 'pantry'), item);
     const docSnap = await getDoc(docRef);
     if (docSnap.exists()) {
@@ -75,25 +79,100 @@ export default function Home() {
       }
       console.log('Item deleted successfully');
     }
-
-
     await updatePantry();
-  }
+  };
 
   const handleDeleteItem = async (item) => {
-      await deleteItem(item);
-    
-  }
+    await deleteItem(item);
+  };
 
   const [searchTerm, setSearchTerm] = useState('');
 
   const handleSearch = (event) => {
     setSearchTerm(event.target.value);
-  }
+  };
 
   const filteredPantryItems = pantryItems.filter((item) => {
     return item.name.toLowerCase().includes(searchTerm.toLowerCase());
   });
+
+  const handleTakePhoto = () => {
+    const photo = camera.current.takePhoto();
+    setImage(photo);
+    setCameraOpen(false);
+  };
+
+  const sendImageToServer = async (imageData) => {
+  const formData = new FormData();
+  formData.append('image', dataURItoBlob(imageData), 'image.jpg');
+
+  try {
+    const response = await fetch('http://localhost:5000/api/analyze-image', {
+      method: 'POST',
+      body: formData,
+      mode: 'cors',
+      credentials: 'omit',
+      headers: {
+        'Accept': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    const data = await response.json();
+    return data.result;
+  } catch (error) {
+    console.error('Error:', error);
+    return null;
+  }
+};
+  
+
+  // const sendImageToServer = async (imageData) => {
+  //   const formData = new FormData();
+  //   formData.append('image', dataURItoBlob(imageData), 'image.jpg');
+  
+  //   try {
+  //     const response = await fetch('http://localhost:5000/api/analyze-image', {
+  //       method: 'POST',
+  //       body: formData,
+  //     });
+  
+  //     if (!response.ok) {
+  //       throw new Error('Network response was not ok');
+  //     }
+  
+  //     const data = await response.json();
+  //     return data.result;
+  //   } catch (error) {
+  //     console.error('Error:', error);
+  //     return null;
+  //   }
+  // };
+
+  // Helper function to convert data URI to Blob
+function dataURItoBlob(dataURI) {
+  const byteString = atob(dataURI.split(',')[1]);
+  const mimeString = dataURI.split(',')[0].split(':')[1].split(';')[0];
+  const ab = new ArrayBuffer(byteString.length);
+  const ia = new Uint8Array(ab);
+  for (let i = 0; i < byteString.length; i++) {
+    ia[i] = byteString.charCodeAt(i);
+  }
+  return new Blob([ab], { type: mimeString });
+}
+
+const handleAddFromPhoto = async () => {
+  if (image) {
+    const result = await sendImageToServer(image);
+    if (result) {
+      addItem(result);
+      setImage(null);
+    }
+  }
+};
 
   return (
     <Box
@@ -103,7 +182,8 @@ export default function Home() {
       justifyContent={'center'}
       alignItems={'center'}
       flexDirection={'column'}
-      gap={2} >
+      gap={2}
+    >
       <TextField
         id="outlined-basic"
         label="Search"
@@ -111,7 +191,23 @@ export default function Home() {
         value={searchTerm}
         onChange={handleSearch}
       />
-      <Button onClick={handleOpen} variant="contained">ADD</Button>
+      <Box>
+        <Box display={'flex'} alignItems={'center'} justifyContent={'center'}>
+        <Typography variant="h6">Take a picture of the item</Typography>
+        <IconButton onClick={() => setCameraOpen(true)}>
+          <CameraAltIcon />
+        </IconButton>
+        </Box>
+        {cameraOpen && (
+          <Box display={'flex'} alignItems={'center'} justifyContent={'center'}>
+            <Camera ref={camera} />
+            <Button onClick={handleTakePhoto} variant="contained">Take Photo</Button>
+          </Box>
+        )}
+        {image && <img src={image} alt="Taken photo" />}
+      </Box>
+      <Button onClick={handleAddFromPhoto} variant="contained">ADD FROM PHOTO</Button>
+      <Button onClick={handleOpen} variant="contained">ADD MANUALLY</Button>
       <Modal
         open={open}
         onClose={handleClose}
@@ -207,5 +303,5 @@ export default function Home() {
         </Stack>
       </Box>
     </Box>
-  )
+  );
 }
